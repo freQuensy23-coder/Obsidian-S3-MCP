@@ -63,5 +63,4 @@ curl -s http://127.0.0.1:8080/mcp \
 go test ./...
 ```
 
-The exam test in `internal/exam` starts a local S3-compatible HTTP server, loads sample Obsidian files into it, calls the MCP endpoint, and verifies caching.
-
+The exam test in `internal/exam` starts a real MinIO S3-compatible container, creates a bucket, uploads sample Obsidian files through AWS SDK, calls the MCP endpoint, and verifies caching. Docker must be running.

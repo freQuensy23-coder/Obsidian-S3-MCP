@@ -7,11 +7,16 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"sort"
 	"strings"
-	"sync"
 	"testing"
 	"time"
+
+	"github.com/aws/aws-sdk-go-v2/aws"
+	awsconfig "github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/credentials"
+	"github.com/aws/aws-sdk-go-v2/service/s3"
+	"github.com/testcontainers/testcontainers-go"
+	"github.com/testcontainers/testcontainers-go/wait"
 
 	"notesmcp/internal/auth"
 	"notesmcp/internal/config"
@@ -21,23 +26,31 @@ import (
 	"notesmcp/internal/usecase/vault"
 )
 
-func TestMCPReadsObsidianVaultFromLocalS3CompatibleStorage(t *testing.T) {
-	s3 := newFakeS3(map[string]string{
+const (
+	minioAccessKey = "minioadmin"
+	minioSecretKey = "minioadmin"
+	testBucket     = "notes"
+)
+
+func TestMCPReadsObsidianVaultFromRealS3CompatibleBucket(t *testing.T) {
+	ctx := context.Background()
+	endpoint := startMinIO(t, ctx)
+	s3Client := newS3Client(t, ctx, endpoint)
+	createBucket(t, ctx, s3Client, testBucket)
+	putObjects(t, ctx, s3Client, testBucket, map[string]string{
 		"Home.md":             "[[Haskell]]\n![[Materials/image.png]]",
 		"Haskell.md":          "#guide\nFunctional programming note",
 		"Materials/image.png": "png-bytes",
 		"Excalidraw/Board.md": "```compressed-json\nignored\n```",
 		"Tasks/Read later.md": "todo",
 	})
-	s3Server := httptest.NewServer(s3)
-	t.Cleanup(s3Server.Close)
 
-	store, err := s3store.New(context.Background(), config.S3Config{
-		Endpoint:        s3Server.URL,
-		Region:          "test-region",
-		AccessKeyID:     "test-access",
-		SecretAccessKey: "test-secret",
-		Bucket:          "notes",
+	store, err := s3store.New(ctx, config.S3Config{
+		Endpoint:        endpoint,
+		Region:          "us-east-1",
+		AccessKeyID:     minioAccessKey,
+		SecretAccessKey: minioSecretKey,
+		Bucket:          testBucket,
 	})
 	if err != nil {
 		t.Fatalf("create s3 store: %v", err)
@@ -52,25 +65,115 @@ func TestMCPReadsObsidianVaultFromLocalS3CompatibleStorage(t *testing.T) {
 	if !ok {
 		t.Fatalf("overview result has unexpected shape: %#v", overview)
 	}
+	if got := result["total_objects"]; got != float64(5) {
+		t.Fatalf("total_objects = %#v, want 5", got)
+	}
 	if got := result["markdown_notes"]; got != float64(4) {
 		t.Fatalf("markdown_notes = %#v, want 4", got)
 	}
 
 	first := callTool(t, mcpServer.URL, "test-token", "get_note", map[string]any{"key": "Home.md"})
-	second := callTool(t, mcpServer.URL, "test-token", "get_note", map[string]any{"key": "Home.md"})
 	firstResult := first["result"].(map[string]any)
-	secondResult := second["result"].(map[string]any)
-	if firstResult["body"] != "[[Haskell]]\n![[Materials/image.png]]" || secondResult["body"] != firstResult["body"] {
-		t.Fatalf("unexpected get_note bodies: %#v %#v", firstResult["body"], secondResult["body"])
+	if firstResult["body"] != "[[Haskell]]\n![[Materials/image.png]]" {
+		t.Fatalf("first Home.md body = %#v", firstResult["body"])
 	}
-	if got := s3.getObjectCalls("Home.md"); got != 1 {
-		t.Fatalf("local S3 GetObject calls for Home.md = %d, want 1 due to cache", got)
+
+	putObject(t, ctx, s3Client, testBucket, "Home.md", "changed in real minio")
+	second := callTool(t, mcpServer.URL, "test-token", "get_note", map[string]any{"key": "Home.md"})
+	secondResult := second["result"].(map[string]any)
+	if secondResult["body"] != firstResult["body"] {
+		t.Fatalf("cache missed inside TTL: second body = %#v, first body = %#v", secondResult["body"], firstResult["body"])
 	}
 
 	backlinks := callTool(t, mcpServer.URL, "test-token", "get_backlinks", map[string]any{"key": "Haskell.md"})
 	backlinkResult := backlinks["result"].([]any)
 	if len(backlinkResult) != 1 || backlinkResult[0].(map[string]any)["key"] != "Home.md" {
 		t.Fatalf("backlinks = %#v, want Home.md", backlinkResult)
+	}
+}
+
+func startMinIO(t *testing.T, ctx context.Context) string {
+	t.Helper()
+
+	req := testcontainers.ContainerRequest{
+		Image:        "minio/minio:RELEASE.2025-04-22T22-12-26Z",
+		ExposedPorts: []string{"9000/tcp"},
+		Env: map[string]string{
+			"MINIO_ROOT_USER":     minioAccessKey,
+			"MINIO_ROOT_PASSWORD": minioSecretKey,
+		},
+		Cmd:        []string{"server", "/data"},
+		WaitingFor: wait.ForHTTP("/minio/health/ready").WithPort("9000/tcp").WithStartupTimeout(60 * time.Second),
+	}
+
+	container, err := testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{
+		ContainerRequest: req,
+		Started:          true,
+	})
+	if err != nil {
+		t.Fatalf("start minio container: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := testcontainers.TerminateContainer(container); err != nil {
+			t.Fatalf("terminate minio container: %v", err)
+		}
+	})
+
+	host, err := container.Host(ctx)
+	if err != nil {
+		t.Fatalf("minio host: %v", err)
+	}
+	port, err := container.MappedPort(ctx, "9000/tcp")
+	if err != nil {
+		t.Fatalf("minio mapped port: %v", err)
+	}
+	return fmt.Sprintf("http://%s:%s", host, port.Port())
+}
+
+func newS3Client(t *testing.T, ctx context.Context, endpoint string) *s3.Client {
+	t.Helper()
+
+	cfg, err := awsconfig.LoadDefaultConfig(
+		ctx,
+		awsconfig.WithRegion("us-east-1"),
+		awsconfig.WithCredentialsProvider(credentials.NewStaticCredentialsProvider(minioAccessKey, minioSecretKey, "")),
+	)
+	if err != nil {
+		t.Fatalf("load aws config: %v", err)
+	}
+
+	return s3.NewFromConfig(cfg, func(options *s3.Options) {
+		options.BaseEndpoint = aws.String(endpoint)
+		options.UsePathStyle = true
+	})
+}
+
+func createBucket(t *testing.T, ctx context.Context, client *s3.Client, bucket string) {
+	t.Helper()
+
+	if _, err := client.CreateBucket(ctx, &s3.CreateBucketInput{Bucket: aws.String(bucket)}); err != nil {
+		t.Fatalf("create bucket: %v", err)
+	}
+}
+
+func putObjects(t *testing.T, ctx context.Context, client *s3.Client, bucket string, objects map[string]string) {
+	t.Helper()
+
+	for key, body := range objects {
+		putObject(t, ctx, client, bucket, key, body)
+	}
+}
+
+func putObject(t *testing.T, ctx context.Context, client *s3.Client, bucket, key, body string) {
+	t.Helper()
+
+	_, err := client.PutObject(ctx, &s3.PutObjectInput{
+		Bucket: aws.String(bucket),
+		Key:    aws.String(key),
+		Body:   strings.NewReader(body),
+	})
+	if err != nil {
+		t.Fatalf("put object %s: %v", key, err)
 	}
 }
 
@@ -111,63 +214,4 @@ func callTool(t *testing.T, url, token, name string, args map[string]any) map[st
 		t.Fatalf("rpc error: %#v", out["error"])
 	}
 	return out
-}
-
-type fakeS3 struct {
-	mu       sync.Mutex
-	objects  map[string]string
-	getCalls map[string]int
-}
-
-func newFakeS3(objects map[string]string) *fakeS3 {
-	return &fakeS3{objects: objects, getCalls: map[string]int{}}
-}
-
-func (s *fakeS3) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	key := strings.TrimPrefix(r.URL.Path, "/notes")
-	key = strings.TrimPrefix(key, "/")
-	if r.Method == http.MethodGet && r.URL.Query().Get("list-type") == "2" {
-		s.serveList(w)
-		return
-	}
-	if r.Method == http.MethodGet && key != "" {
-		s.serveGet(w, key)
-		return
-	}
-	http.NotFound(w, r)
-}
-
-func (s *fakeS3) serveList(w http.ResponseWriter) {
-	keys := make([]string, 0, len(s.objects))
-	for key := range s.objects {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
-
-	w.Header().Set("Content-Type", "application/xml")
-	fmt.Fprint(w, `<ListBucketResult xmlns="http://s3.amazonaws.com/doc/2006-03-01/">`)
-	fmt.Fprint(w, `<Name>notes</Name><KeyCount>`, len(keys), `</KeyCount><IsTruncated>false</IsTruncated>`)
-	for _, key := range keys {
-		fmt.Fprintf(w, `<Contents><Key>%s</Key><LastModified>2026-05-08T00:00:00Z</LastModified><Size>%d</Size></Contents>`, key, len(s.objects[key]))
-	}
-	fmt.Fprint(w, `</ListBucketResult>`)
-}
-
-func (s *fakeS3) serveGet(w http.ResponseWriter, key string) {
-	value, ok := s.objects[key]
-	if !ok {
-		http.NotFound(w, nil)
-		return
-	}
-	s.mu.Lock()
-	s.getCalls[key]++
-	s.mu.Unlock()
-	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write([]byte(value))
-}
-
-func (s *fakeS3) getObjectCalls(key string) int {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.getCalls[key]
 }
