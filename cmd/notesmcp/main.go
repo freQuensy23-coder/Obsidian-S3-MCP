@@ -29,11 +29,7 @@ func run() error {
 		return err
 	}
 
-	envPath := os.Getenv("NOTES_MCP_ENV_FILE")
-	if envPath == "" {
-		envPath = ".env"
-	}
-	s3Cfg, err := config.LoadS3ConfigFile(envPath)
+	s3Cfg, err := loadS3Config()
 	if err != nil {
 		return fmt.Errorf("load s3 config: %w", err)
 	}
@@ -68,4 +64,17 @@ func run() error {
 		return nil
 	}
 	return err
+}
+
+func loadS3Config() (config.S3Config, error) {
+	s3Cfg, err := config.LoadS3ConfigFromEnv()
+	if err == nil {
+		return s3Cfg, nil
+	}
+
+	envPath := os.Getenv("NOTES_MCP_ENV_FILE")
+	if envPath == "" {
+		envPath = ".env"
+	}
+	return config.LoadS3ConfigFile(envPath)
 }

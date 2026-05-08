@@ -1,0 +1,26 @@
+services:
+  obsidian-s3-mcp:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      NOTES_MCP_ADDR: 0.0.0.0:8080
+      NOTES_MCP_TOKEN: ${NOTES_MCP_TOKEN}
+      NOTES_MCP_S3_ENDPOINT: ${NOTES_MCP_S3_ENDPOINT}
+      NOTES_MCP_S3_REGION: ${NOTES_MCP_S3_REGION}
+      NOTES_MCP_S3_ACCESS_KEY_ID: ${NOTES_MCP_S3_ACCESS_KEY_ID}
+      NOTES_MCP_S3_SECRET_ACCESS_KEY: ${NOTES_MCP_S3_SECRET_ACCESS_KEY}
+      NOTES_MCP_S3_BUCKET: ${NOTES_MCP_S3_BUCKET}
+      NOTES_MCP_S3_INSECURE_SKIP_VERIFY: ${NOTES_MCP_S3_INSECURE_SKIP_VERIFY:-false}
+    ports:
+      - "8080"
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.obsidian-s3-mcp.rule=Host(`s2qoqdeyc5gyiu86cas1ye2g.167.235.18.16.sslip.io`)"
+      - "traefik.http.routers.obsidian-s3-mcp.entrypoints=http"
+      - "traefik.http.services.obsidian-s3-mcp.loadbalancer.server.port=8080"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 12

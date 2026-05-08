@@ -1,8 +1,8 @@
 # Obsidian S3 MCP
 
-Read-only MCP server for an Obsidian vault stored in S3-compatible storage.
+Read/write MCP server for an Obsidian vault stored in S3-compatible storage.
 
-It exists so an agent can inspect notes without syncing the whole vault locally. This project is built for an Obsidian setup that uses the Remotely Save/RemotelySafe plugin to automatically sync the vault into an S3 bucket.
+It exists so an agent can inspect and edit notes without syncing the whole vault locally. This project is built for an Obsidian setup that uses the Remotely Save/RemotelySafe plugin to automatically sync the vault into an S3 bucket.
 
 The server understands common Obsidian markdown patterns such as wikilinks, embeds, tags, backlinks, and attachment keys. Excalidraw and Dataview blocks are returned as raw markdown.
 
@@ -49,6 +49,26 @@ curl -s http://127.0.0.1:8080/mcp \
 - `get_note`: read one markdown note by S3 key.
 - `search_notes`: search by key, title, or markdown body.
 - `get_backlinks`: list notes linking to a note.
+- `write_note`: replace the full markdown body of a note.
+- `append_note`: append markdown text to a note.
+- `replace_in_note`: edit like Claude Code's file edit tool. `old_text` must match exactly and must be unique unless `replace_all` is true.
+- `add_note_tags`: add existing Obsidian tag-note links such as `[[0000.Life]]` or `[[0001.ML]]`. The tool resolves inputs like `Life`, `0000.Life`, or `[[0000.Life]]` against existing `0000.*.md` / `0001.*.md` notes before editing.
+
+## Coolify
+
+The repository includes `Dockerfile` and `docker-compose.yml` for Coolify.
+
+Required environment variables:
+
+- `NOTES_MCP_TOKEN`
+- `NOTES_MCP_S3_ENDPOINT`
+- `NOTES_MCP_S3_REGION`
+- `NOTES_MCP_S3_ACCESS_KEY_ID`
+- `NOTES_MCP_S3_SECRET_ACCESS_KEY`
+- `NOTES_MCP_S3_BUCKET`
+- `NOTES_MCP_S3_INSECURE_SKIP_VERIFY`
+
+The compose file exposes the MCP server on port `8080` and maps Traefik to `/mcp`.
 
 ## Architecture
 

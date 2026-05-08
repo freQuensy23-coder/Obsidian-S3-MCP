@@ -66,6 +66,44 @@ func TestListObjectsCachesDefensiveCopy(t *testing.T) {
 	}
 }
 
+func TestPutObjectInvalidatesCachedObjectAndList(t *testing.T) {
+	clock := fakeClock{now: time.Unix(100, 0)}
+	store := &countingStore{
+		objects: map[string][]byte{"Home.md": []byte("first")},
+		listed:  []domain.Object{{Key: "Home.md", Size: 5}},
+	}
+	cached := New(store, 30*time.Second, clock.Now)
+
+	if _, err := cached.GetObject(context.Background(), "Home.md"); err != nil {
+		t.Fatalf("warm GetObject returned error: %v", err)
+	}
+	if _, err := cached.ListObjects(context.Background()); err != nil {
+		t.Fatalf("warm ListObjects returned error: %v", err)
+	}
+	if err := cached.PutObject(context.Background(), "Home.md", []byte("second")); err != nil {
+		t.Fatalf("PutObject returned error: %v", err)
+	}
+
+	body, err := cached.GetObject(context.Background(), "Home.md")
+	if err != nil {
+		t.Fatalf("GetObject after PutObject returned error: %v", err)
+	}
+	if string(body) != "second" {
+		t.Fatalf("body = %q, want second", body)
+	}
+	if store.getCalls != 2 {
+		t.Fatalf("getCalls = %d, want 2 after invalidation", store.getCalls)
+	}
+
+	objects, err := cached.ListObjects(context.Background())
+	if err != nil {
+		t.Fatalf("ListObjects after PutObject returned error: %v", err)
+	}
+	if objects[0].Size != 6 {
+		t.Fatalf("object size = %d, want refreshed size 6", objects[0].Size)
+	}
+}
+
 type fakeClock struct {
 	now time.Time
 }
@@ -89,4 +127,16 @@ func (s *countingStore) ListObjects(context.Context) ([]domain.Object, error) {
 func (s *countingStore) GetObject(_ context.Context, key string) ([]byte, error) {
 	s.getCalls++
 	return append([]byte(nil), s.objects[key]...), nil
+}
+
+func (s *countingStore) PutObject(_ context.Context, key string, body []byte) error {
+	s.objects[key] = append([]byte(nil), body...)
+	for i := range s.listed {
+		if s.listed[i].Key == key {
+			s.listed[i].Size = int64(len(body))
+			return nil
+		}
+	}
+	s.listed = append(s.listed, domain.Object{Key: key, Size: int64(len(body))})
+	return nil
 }

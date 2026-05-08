@@ -65,6 +65,31 @@ func LoadS3ConfigFile(path string) (S3Config, error) {
 	return LoadS3Config(file)
 }
 
+func LoadS3ConfigFromEnv() (S3Config, error) {
+	endpoint := strings.TrimSpace(os.Getenv("NOTES_MCP_S3_ENDPOINT"))
+	region := strings.TrimSpace(os.Getenv("NOTES_MCP_S3_REGION"))
+	accessKeyID := strings.TrimSpace(os.Getenv("NOTES_MCP_S3_ACCESS_KEY_ID"))
+	secretAccessKey := strings.TrimSpace(os.Getenv("NOTES_MCP_S3_SECRET_ACCESS_KEY"))
+	bucket := strings.TrimSpace(os.Getenv("NOTES_MCP_S3_BUCKET"))
+	if endpoint == "" && region == "" && accessKeyID == "" && secretAccessKey == "" && bucket == "" {
+		return S3Config{}, errors.New("S3 env config is not set")
+	}
+	if endpoint == "" || region == "" || accessKeyID == "" || secretAccessKey == "" || bucket == "" {
+		return S3Config{}, errors.New("NOTES_MCP_S3_ENDPOINT, NOTES_MCP_S3_REGION, NOTES_MCP_S3_ACCESS_KEY_ID, NOTES_MCP_S3_SECRET_ACCESS_KEY, and NOTES_MCP_S3_BUCKET are required together")
+	}
+	if !strings.HasPrefix(endpoint, "http://") && !strings.HasPrefix(endpoint, "https://") {
+		endpoint = "https://" + endpoint
+	}
+	return S3Config{
+		Endpoint:        endpoint,
+		Region:          region,
+		AccessKeyID:     accessKeyID,
+		SecretAccessKey: secretAccessKey,
+		Bucket:          bucket,
+		InsecureTLS:     parseBool(os.Getenv("NOTES_MCP_S3_INSECURE_SKIP_VERIFY")),
+	}, nil
+}
+
 func LoadServerConfig() (ServerConfig, error) {
 	token := strings.TrimSpace(os.Getenv("NOTES_MCP_TOKEN"))
 	if token == "" {

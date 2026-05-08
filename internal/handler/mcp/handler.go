@@ -113,6 +113,44 @@ func (h *Handler) callTool(ctx context.Context, params toolCallParams) (any, err
 			return nil, err
 		}
 		return h.vault.Backlinks(ctx, args.Key)
+	case "write_note":
+		var args struct {
+			Key  string `json:"key"`
+			Body string `json:"body"`
+		}
+		if err := json.Unmarshal(params.Arguments, &args); err != nil {
+			return nil, err
+		}
+		return h.vault.WriteNote(ctx, args.Key, args.Body)
+	case "append_note":
+		var args struct {
+			Key  string `json:"key"`
+			Text string `json:"text"`
+		}
+		if err := json.Unmarshal(params.Arguments, &args); err != nil {
+			return nil, err
+		}
+		return h.vault.AppendNote(ctx, args.Key, args.Text)
+	case "replace_in_note":
+		var args struct {
+			Key        string `json:"key"`
+			OldText    string `json:"old_text"`
+			NewText    string `json:"new_text"`
+			ReplaceAll bool   `json:"replace_all"`
+		}
+		if err := json.Unmarshal(params.Arguments, &args); err != nil {
+			return nil, err
+		}
+		return h.vault.ReplaceInNote(ctx, args.Key, args.OldText, args.NewText, args.ReplaceAll)
+	case "add_note_tags":
+		var args struct {
+			Key  string   `json:"key"`
+			Tags []string `json:"tags"`
+		}
+		if err := json.Unmarshal(params.Arguments, &args); err != nil {
+			return nil, err
+		}
+		return h.vault.AddNoteTags(ctx, args.Key, args.Tags)
 	default:
 		return nil, errors.New("unknown tool")
 	}
@@ -125,6 +163,10 @@ func tools() []map[string]any {
 		{"name": "get_note", "description": "Read one markdown note by S3 key."},
 		{"name": "search_notes", "description": "Search notes by key, title, or markdown body."},
 		{"name": "get_backlinks", "description": "List notes linking to a markdown note."},
+		{"name": "write_note", "description": "Replace the full markdown body of a note."},
+		{"name": "append_note", "description": "Append markdown text to a note."},
+		{"name": "replace_in_note", "description": "Replace one or all exact text fragments inside a note."},
+		{"name": "add_note_tags", "description": "Add Obsidian tag links such as [[0000.Life]] to a note."},
 	}
 }
 

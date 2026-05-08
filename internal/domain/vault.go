@@ -31,6 +31,7 @@ type Overview struct {
 type ObjectStore interface {
 	ListObjects(ctx context.Context) ([]Object, error)
 	GetObject(ctx context.Context, key string) ([]byte, error)
+	PutObject(ctx context.Context, key string, body []byte) error
 }
 
 type VaultUseCase interface {
@@ -39,4 +40,8 @@ type VaultUseCase interface {
 	GetNote(context.Context, string) (Note, error)
 	SearchNotes(context.Context, string, int) ([]Note, error)
 	Backlinks(context.Context, string) ([]Note, error)
+	WriteNote(context.Context, string, string) (Note, error)
+	AppendNote(context.Context, string, string) (Note, error)
+	ReplaceInNote(context.Context, string, string, string, bool) (Note, error)
+	AddNoteTags(context.Context, string, []string) (Note, error)
 }

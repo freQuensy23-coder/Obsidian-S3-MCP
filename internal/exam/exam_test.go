@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -39,6 +40,8 @@ func TestMCPReadsObsidianVaultFromRealS3CompatibleBucket(t *testing.T) {
 	createBucket(t, ctx, s3Client, testBucket)
 	putObjects(t, ctx, s3Client, testBucket, map[string]string{
 		"Home.md":             "[[Haskell]]\n![[Materials/image.png]]",
+		"0000.Life.md":        "",
+		"0001.ML.md":          "",
 		"Haskell.md":          "#guide\nFunctional programming note",
 		"Materials/image.png": "png-bytes",
 		"Excalidraw/Board.md": "```compressed-json\nignored\n```",
@@ -65,11 +68,11 @@ func TestMCPReadsObsidianVaultFromRealS3CompatibleBucket(t *testing.T) {
 	if !ok {
 		t.Fatalf("overview result has unexpected shape: %#v", overview)
 	}
-	if got := result["total_objects"]; got != float64(5) {
-		t.Fatalf("total_objects = %#v, want 5", got)
+	if got := result["total_objects"]; got != float64(7) {
+		t.Fatalf("total_objects = %#v, want 7", got)
 	}
-	if got := result["markdown_notes"]; got != float64(4) {
-		t.Fatalf("markdown_notes = %#v, want 4", got)
+	if got := result["markdown_notes"]; got != float64(6) {
+		t.Fatalf("markdown_notes = %#v, want 6", got)
 	}
 
 	first := callTool(t, mcpServer.URL, "test-token", "get_note", map[string]any{"key": "Home.md"})
@@ -89,6 +92,40 @@ func TestMCPReadsObsidianVaultFromRealS3CompatibleBucket(t *testing.T) {
 	backlinkResult := backlinks["result"].([]any)
 	if len(backlinkResult) != 1 || backlinkResult[0].(map[string]any)["key"] != "Home.md" {
 		t.Fatalf("backlinks = %#v, want Home.md", backlinkResult)
+	}
+
+	replace := callTool(t, mcpServer.URL, "test-token", "replace_in_note", map[string]any{
+		"key":         "Tasks/Read later.md",
+		"old_text":    "todo",
+		"new_text":    "done",
+		"replace_all": false,
+	})
+	if replace["result"].(map[string]any)["body"] != "done" {
+		t.Fatalf("replace result = %#v, want done", replace["result"])
+	}
+
+	tagged := callTool(t, mcpServer.URL, "test-token", "add_note_tags", map[string]any{
+		"key":  "Tasks/Read later.md",
+		"tags": []string{"0000.Life.md", "[[0001.ML]]"},
+	})
+	if tagged["result"].(map[string]any)["body"] != "[[0000.Life]] [[0001.ML]]\ndone" {
+		t.Fatalf("tagged body = %#v", tagged["result"].(map[string]any)["body"])
+	}
+
+	uploaded, err := s3Client.GetObject(ctx, &s3.GetObjectInput{
+		Bucket: aws.String(testBucket),
+		Key:    aws.String("Tasks/Read later.md"),
+	})
+	if err != nil {
+		t.Fatalf("get written object from minio: %v", err)
+	}
+	defer uploaded.Body.Close()
+	written, err := io.ReadAll(uploaded.Body)
+	if err != nil {
+		t.Fatalf("read written object: %v", err)
+	}
+	if string(written) != "[[0000.Life]] [[0001.ML]]\ndone" {
+		t.Fatalf("minio body = %q", written)
 	}
 }
 

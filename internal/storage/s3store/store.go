@@ -1,6 +1,7 @@
 package s3store
 
 import (
+	"bytes"
 	"context"
 	"crypto/tls"
 	"io"
@@ -77,4 +78,13 @@ func (s *Store) GetObject(ctx context.Context, key string) ([]byte, error) {
 	defer object.Body.Close()
 
 	return io.ReadAll(object.Body)
+}
+
+func (s *Store) PutObject(ctx context.Context, key string, body []byte) error {
+	_, err := s.client.PutObject(ctx, &s3.PutObjectInput{
+		Bucket: aws.String(s.bucket),
+		Key:    aws.String(key),
+		Body:   bytes.NewReader(body),
+	})
+	return err
 }

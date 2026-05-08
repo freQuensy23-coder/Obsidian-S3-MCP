@@ -81,6 +81,19 @@ func (s *Store) GetObject(ctx context.Context, key string) ([]byte, error) {
 	return out, nil
 }
 
+func (s *Store) PutObject(ctx context.Context, key string, body []byte) error {
+	if err := s.next.PutObject(ctx, key, body); err != nil {
+		return err
+	}
+
+	s.mu.Lock()
+	delete(s.objects, key)
+	s.list = nil
+	s.listUntil = time.Time{}
+	s.mu.Unlock()
+	return nil
+}
+
 func cloneObjects(objects []domain.Object) []domain.Object {
 	return append([]domain.Object(nil), objects...)
 }
