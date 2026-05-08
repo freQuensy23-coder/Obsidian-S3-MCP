@@ -1,8 +1,10 @@
-# notesMCP
+# Obsidian S3 MCP
 
 Read-only MCP server for an Obsidian vault stored in S3-compatible storage.
 
-It exists so an agent can inspect notes without syncing the whole vault locally. The server understands common Obsidian markdown patterns such as wikilinks, embeds, tags, backlinks, and attachment keys. Excalidraw and Dataview blocks are returned as raw markdown.
+It exists so an agent can inspect notes without syncing the whole vault locally. This project is built for an Obsidian setup that uses the Remotely Save/RemotelySafe plugin to automatically sync the vault into an S3 bucket.
+
+The server understands common Obsidian markdown patterns such as wikilinks, embeds, tags, backlinks, and attachment keys. Excalidraw and Dataview blocks are returned as raw markdown.
 
 ## Run
 
